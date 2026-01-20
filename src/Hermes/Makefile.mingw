@@ -1,0 +1,25 @@
+VERSION = 3:1
+DBGFLAGS = -O2 -g0 -DNDEBUG
+CXXFLAGS = -std=c++17 -Wall -Wno-unknown-pragmas -fPIC -shared $(DBGFLAGS) -DHERMES_EXPORTS
+INCLUDES = -I. -I../include -I../../References -I../../References/pugixml
+LIBS = -lws2_32 -lmswsock -liphlpapi -static-libgcc -static-libstdc++
+
+SOURCES = $(wildcard *.cpp)
+OBJECTS = $(SOURCES:.cpp=.o) ../../References/pugixml/pugixml.o
+EXECUTABLE = Hermes.dll
+
+all: $(EXECUTABLE)
+
+$(EXECUTABLE): $(OBJECTS)
+	g++ -shared -o $@ $(OBJECTS) $(LIBS) -Wl,--export-all-symbols
+
+%.o: %.cpp
+	g++ $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+../../References/pugixml/pugixml.o: ../../References/pugixml/pugixml.cpp
+	g++ -std=c++17 -O2 -Wall -I../../References/pugixml -c $< -o $@
+
+clean:
+	del /Q *.o $(EXECUTABLE) 2>nul
+
+.PHONY: all clean

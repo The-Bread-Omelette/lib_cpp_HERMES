@@ -1,0 +1,21 @@
+PROGRAM = BoostTestHermes.exe
+INCLUDES = -I. -I../../src/include -I../../References
+LIBDIRS = -L../../src/Hermes -L../../References/boost_libs
+LIBS = -lHermes -lboost_unit_test_framework-mgw -lws2_32 -lmswsock -static-libgcc -static-libstdc++
+
+SOURCES = CApiTest.cpp ConfigurationTest.cpp DownstreamTest.cpp HermesDataTest.cpp SerializerTest.cpp TestMain.cpp Trace.cpp UpstreamTest.cpp
+OBJECTS = $(SOURCES:.cpp=.o)
+CXXFLAGS = -std=c++17 -O2 -Wall -D_WINDOWS $(INCLUDES)
+
+all: $(PROGRAM)
+
+$(PROGRAM): $(OBJECTS)
+	g++ -o $@ $(OBJECTS) $(LIBDIRS) $(LIBS)
+
+%.o: %.cpp
+	g++ $(CXXFLAGS) -c $< -o $@
+
+clean:
+	del /Q *.o $(PROGRAM) 2>nul
+
+.PHONY: all clean
