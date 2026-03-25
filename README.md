@@ -1,260 +1,93 @@
-# Hermes
-
-"The Hermes Standard for vendor-independent machine-to-machine communication in SMT assembly" is a new, non-proprietary open protocol, based on TCP/IP- and XML, that takes exchange of PCB related data between the different machines in electronics assembly lines to the next level. It was initiated and developed by a group of leading equipment suppliers, bundling their expertise in order to achieve a great step towards advanced process integration. And the story continues: The Hermes Standard Initiative is open to all equipment vendors who want to actively participate in bringing the benefits of Industry 4.0 to their customers.
----
-
-## Quick Start
-
-### Prerequisites
-
-**No Boost.Test library needed for using Hermes!** Only headers required.
-
-| Component | Required For | Notes |
-|-----------|--------------|-------|
-| **Boost headers** (1.66-1.78) | Building library | Header-only, no compilation |
-| **Pugixml** | Building library | Lightweight XML parser |
-| **MinGW/GCC** | Compilation | g++ 7.0+ with C++17 support |
-| Boost.Test library | Official test suite | **Optional** - for library developers|
-
-### Installation
-
-**Windows (MinGW):**
-```batch
-# Clone repository
-git clone https://github.com/hermes-org/lib_cpp
-cd lib_cpp
-
-# Run setup (checks dependencies, builds library, runs tests)
-setup_windows.bat
-```
-
-**Linux/macOS:**
-```bash
-# Clone repository
-git clone https://github.com/hermes-org/lib_cpp
-cd lib_cpp
-
-# Run setup
-chmod +x setup.sh
-./setup.sh
-```
-
-### Build Output
-
-- **Windows:** `Hermes.dll` + `Hermes.lib` (import library)
-- **Linux:** `libhermes.so.3.1.0` (shared library)
-- **Headers:** `src/include/Hermes.h` (main header)
-
----
-
-## Using Hermes in Your Application
-
-### 1. Minimal Example
-
-```cpp
-#include <Hermes.h>
-#include <iostream>
-
-int main() {
-    // Create upstream connection (machine → line)
-    Hermes::Upstream upstream;
-    
-    // Configure connection
-    Hermes::UpstreamSettings settings;
-    settings._laneId = 1;
-    settings._hostAddress = "192.168.1.100";  // Downstream machine IP
-    settings._port = 50101;
-    
-    // Connect to line
-    upstream.Connect(1, settings);
-    
-    std::cout << "Connected to Hermes line" << std::endl;
-    
-    // Signal board available
-    Hermes::BoardAvailableData board;
-    board._boardId = "PCB-12345";
-    board._topBarcode = "TOP-BARCODE-001";
-    board._lengthInMM = 250.0;
-    board._widthInMM = 150.0;
-    
-    upstream.Signal(1, board);
-    
-    // Cleanup
-    upstream.Disconnect(1);
-    return 0;
-}
-```
-
-### 2. Compile Your Application
-
-**Windows:**
-```batch
-g++ -std=c++17 -I src/include -L . -o my_app.exe my_app.cpp -lHermes -lws2_32 -lmswsock -static-libgcc -static-libstdc++
-```
-
-**Linux:**
-```bash
-g++ -std=c++17 -I src/include -L . -o my_app my_app.cpp -lhermes -lboost_system -lboost_thread -lpugixml -lpthread -Wl,-rpath,'$ORIGIN'
-```
-
-### 3. Deploy
-
-Include with your application:
-- **Windows:** `my_app.exe` + `Hermes.dll`
-- **Linux:** `my_app` + `libhermes.so*` (set `LD_LIBRARY_PATH` or use rpath)
+Hermes C++ Library (lib_cpp)
+The Hermes Standard (IPC-HERMES-9852) is the modern, non-proprietary TCP/IP and XML-based successor to the legacy SMEMA standard. It enables vendor-independent machine-to-machine communication in SMT assembly lines. This repository provides the official, high-performance C++ implementation of the protocol.
 
----
+1. Core Repository Map
+To navigate the library effectively, refer to the following directory structure:
 
-## Documentation
+src/include/: The Public API. This directory contains the headers required to integrate Hermes into your application.
 
-- **[Getting Started Guide](docs/GETTING_STARTED.md)** - Step-by-step tutorial
-- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
-- **[Building from Source](docs/BUILDING.md)** - Advanced build instructions
+Hermes.hpp: The primary Object-Oriented C++ wrapper.
 
----
+Hermes.h: The low-level C-style API.
 
-## Architecture
+src/Hermes/: The Implementation. Contains the core logic, including the ASIO networking stack, XML serialization, and the standard-compliant state machines.
 
-### Communication Patterns
+test/BoostTestHermes/: Verification Suite. Contains comprehensive unit and integration tests. This is the source of truth for protocol-compliant behavior.
 
-```
-┌─────────────┐         ┌─────────────┐         ┌─────────────┐
-│  Machine A  │────────▶│  Machine B  │────────▶│  Machine C  │
-│  (Upstream) │  Board  │(Up+Down)    │  Board  │ (Downstream)│
-└─────────────┘  Data   └─────────────┘  Data   └─────────────┘
-      ▲                        ▲                        ▲
-      │                        │                        │
-      └────────────────────────┴────────────────────────┘
-                         IPC-CFX (Vertical)
-                    MES / ERP / Cloud Systems
-```
+References/: External Headers. Contains local versions of pugixml and boost headers necessary for compilation in restricted environments.
 
-### Message Types
+2. Technical Requirements
+Dependencies
+C++ Standard: C++17 or higher.
 
-- **Board handling:** BoardAvailable, BoardForecast, TransportFinished
-- **Machine state:** MachineReady, NotificationData, CheckAlive
-- **Work order:** GetWorkOrderData, SetWorkOrderData
-- **Configuration:** SupervisoryServiceDescription, QueryBoardInfo
+Networking: Boost.ASIO (v1.66 through v1.78 recommended).
 
----
+Note: Versions 1.87+ require the -DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT flag.
 
-## Project Structure
+XML Processing: pugixml (included in References/).
 
-```
-hermes/
-├── src/
-│   ├── Hermes/              # Library source code
-│   │   ├── Makefile         # Linux/macOS build
-│   │   ├── Makefile.mingw   # Windows (MinGW) build
-│   │   └── *.cpp            # Implementation files
-│   └── include/             # Public headers
-│       └── Hermes.h
-├── test/
-│   └── BoostTestHermes/     # Official test suite (optional)
-│       ├── Makefile
-│       └── Makefile.mingw
-├── References/              # Dependencies (not in repo)
-│   ├── boost/               # Boost headers
-│   └── pugixml/             # Pugixml source
-├── docs/                    # Documentation
-├── setup_windows.bat        # Windows build script
-├── setup.sh                 # Linux/macOS build script
-└── README.md
-```
+Platform Independence
+The library is designed to be fully platform-independent. It supports:
 
----
+Windows: MSVC (2017+) and MinGW-w64.
 
-## Dependencies Setup
+Linux: GCC (7+) and Clang.
 
-### Boost (Headers Only)
+Build System: The project utilizes CMake (3.15+) to generate native build files (Visual Studio Solutions or Makefiles) for your specific platform.
 
-**Download:** [Boost 1.78.0](https://archives.boost.io/release/1.78.0/source/boost_1_78_0.zip)
+3. Unified Build Process (CMake)
+To build the library on any platform, use the following standard workflow:
 
-```
-# Extract and copy:
-boost_1_78_0/boost/  →  References/boost/
-```
+Generate: mkdir build && cd build && cmake ..
 
-### Pugixml
+Build: cmake --build . --config Release
 
-**Download:** [Pugixml Latest](https://github.com/zeux/pugixml/releases)
+Outputs:
 
-```
-# Copy source files:
-pugixml-*/src/*.hpp  →  References/pugixml/
-pugixml-*/src/*.cpp  →  References/pugixml/
-```
+hermes.dll / hermes.lib (Windows)
 
----
+libhermes.so (Linux)
 
-## Testing
+4. API Architecture & Design
+The Callback Model
+The C++ API follows a strict Interface-Based Callback pattern.
 
-### Simple Test (Recommended)
+Users must implement classes inheriting from IDownstreamCallback (Receivers) or IUpstreamCallback (Senders).
 
-```batch
-# Creates basic connectivity test
-g++ -std=c++17 -I src/include -L . -o simple_test.exe simple_test.cpp -lHermes -lws2_32 -lmswsock
-simple_test.exe
-```
+All pure virtual methods in these interfaces must be overridden to handle protocol events (Connection, Disconnection, Board Available, Machine Ready, etc.).
 
-### Official Test Suite (Optional)
+Execution Model
+Blocking Event Loop: The core processing occurs within the Run() method.
 
-Requires Boost.Test library. See [BUILDING.md](docs/BUILDING.md) for details.
+Threading: Because Run() blocks the calling thread to process network I/O, it must be executed in a dedicated background thread to maintain application responsiveness.
 
-```batch
-cd test/BoostTestHermes
-make -f Makefile.mingw
-./BoostTestHermes.exe
-```
+State Management: The library handles all internal state transitions (e.g., Not Connected -> Service Description -> Not Ready -> Ready) automatically based on the Enable() configuration.
 
----
+5. Supported Communication Channels
+The library implements the four primary channels defined by IPC-HERMES-9852:
 
-## Compatibility
+Upstream: Machine-to-Machine (Sending).
 
-### Hermes Standard Versions
+Downstream: Machine-to-Machine (Receiving).
 
--  IPC-HERMES-9852 v1.0 - v1.5
--  SMEMA backward compatibility mode
+Configuration: Exchange of machine capabilities and line settings.
 
-### Platforms
+Vertical: Communication with factory-level MES/ERP systems.
 
-| Platform | Compiler | Status |
-|----------|----------|--------|
-| Windows 10/11 | MinGW-w64 (GCC 7+) |  Tested |
-| Windows 10/11 | MSVC 2019+ | ⚠️ Community contributions welcome |
-| Linux (Ubuntu/Debian) | GCC 7+ |  Tested |
-| Linux (Fedora/RHEL) | GCC 7+ |  Tested |
+6. Deployment Topologies
+The library supports standard IPv4 networking across various hardware setups:
 
-### Boost Version Compatibility
+Point-to-Point: Direct Ethernet connection between two machines.
 
-⚠️ **IMPORTANT:** Use Boost 1.66 - 1.78 only
+Switched Fabric: Deployment via factory-wide network switches. This is the preferred method for modern "Smart Factory" environments, as it allows a single network interface to handle both horizontal (machine) and vertical (MES) data simultaneously.
 
-- [NO] Boost 1.87+ breaks compatibility (removed `io_service`)
-- [OK] Boost 1.78 recommended (stable, well-tested)
+7. Quality Assurance
+All protocol features are verified against the BoostTestHermes suite.
 
----
+Unit Tests: Verify individual XML serialization and data structures.
 
-## IPC Standards Integration
+Integration Tests: Simulate full handshakes between virtual Upstream and Downstream sessions.
 
-### Hermes + CFX Together
+Automation: Compatible with ctest for continuous integration workflows.
 
-The Hermes Standard drives horizontal integration along the SMT line. IPC-CFX complements this by providing a powerful standard for connecting vertically from the SMT line to an MES.
-
-**Horizontal (Line):** IPC-HERMES-9852 (this library)  
-**Vertical (MES/ERP):** IPC-2591 (CFX) - separate implementation
-
----
-
-## Support & Contributing
-
-- **Issues:** [GitHub Issues](../../issues)
-- **Documentation:** [Wiki](../../wiki)
-- **Official Standard:** [IPC-HERMES-9852](https://www.the-hermes-standard.info/)
-
-### Contributing
-
-Contributions welcome! Please:
-1. Follow existing code style
-2. Add tests for new features
-3. Update documentation
-4. Submit pull requests
+License: Copyright (c) ASM Assembly Systems GmbH & Co. KG. Licensed under the Apache License, Version 2.0. See COPYRIGHT.txt for details.
