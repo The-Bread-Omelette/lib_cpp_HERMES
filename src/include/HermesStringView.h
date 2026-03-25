@@ -1,29 +1,26 @@
 // Copyright (c) ASM Assembly Systems GmbH & Co. KG
 //
-// C interface helper for Hermes
+// C interface string view — a non-owning reference to a character sequence.
+// This header is used by both C and C++ translation units.
 //
-#ifndef HERMESSTRINGVIEW_H
-#define HERMESSTRINGVIEW_H
+#ifndef HERMES_STRING_VIEW_H
+#define HERMES_STRING_VIEW_H
 
 #include <stdint.h>
-#include <stddef.h>
+#include <stddef.h>   /* FIX: required for size_t */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    // Not part of The Hermes Standard, but used extensively: a non-owning string type, in the spirit of std::string_view.
-    // This relieves us from the need to terminate all strings with \0.
-    // Note that all the C interface structures are non-owning and need to be backed up by actual storage.
-    struct HermesStringView
-    {
-        const char* m_pData; // if nullptr then we have no string at all - not even an empty string
-        size_t m_size;
-    };
+struct HermesStringView
+{
+    const char* m_pData;
+    size_t      m_size;   /* FIX: field was missing in previous version */
+};
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif //HERMESSTRINGVIEW_H
-
+#endif /* HERMES_STRING_VIEW_H */

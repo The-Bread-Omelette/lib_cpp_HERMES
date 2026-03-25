@@ -1,157 +1,94 @@
-// =============================================================================
-// rpi2_downstream.cpp  —  RPi2: Downstream machine
-//
-// Build:
-//   g++ -std=c++17 -o rpi2_downstream rpi2_downstream.cpp \
-//       -I/path/to/hermes/src/include \
-//       -L/path/to/hermes/build -lhermes \
-//       -lboost_system -lpthread
-//
-// Run:
-//   LD_LIBRARY_PATH=/path/to/hermes/build ./rpi2_downstream
-//
-// What it does:
-//   - Listens on port 50100 for an incoming connection from RPi1
-//   - Receives ServiceDescription from RPi1
-//   - Sends ServiceDescription back to RPi1
-//   - Prints connection state changes to console
-// =============================================================================
 
-#include "Hermes.hpp"
+#include "HermesModern.hpp"
 #include <iostream>
-#include <string>
 #include <thread>
 #include <chrono>
 #include <atomic>
 #include <csignal>
 
-static const uint16_t    HERMES_PORT      = 50100;
-static const std::string THIS_MACHINE_ID  = "RPi2-Downstream";
-
-static std::atomic<bool>  g_running{true};
-static unsigned           g_activeSession{0};
-
-// Forward declare so callback can reference it
-Hermes::Downstream* g_downstream = nullptr;
-
-void signalHandler(int) { g_running = false; }
-
-// -----------------------------------------------------------------------
-// Downstream callback — receives messages FROM the Upstream (RPi1)
-// -----------------------------------------------------------------------
-struct DownstreamCallback : Hermes::IDownstreamCallback
-{
-    void OnConnected(unsigned sessionId, Hermes::EState state,
-                     const Hermes::ConnectionInfo& info) override
-    {
-        g_activeSession = sessionId;
-        std::cout << "[RPi2] RPi1 connected"
-                  << "  address=" << info.m_address
-                  << "  port="    << info.m_port
-                  << "  session=" << sessionId
-                  << "\n";
-    }
-
-    // RPi1 sends its ServiceDescription — we receive it here
-    void On(unsigned sessionId, Hermes::EState state,
-            const Hermes::ServiceDescriptionData& data) override
-    {
-        std::cout << "[RPi2] Received ServiceDescription from RPi1"
-                  << "  machineId=" << data.m_machineId
-                  << "  laneId="    << data.m_laneId
-                  << "\n";
-
-        // Respond with our own ServiceDescription
-        if (g_downstream)
-        {
-            g_downstream->Post([sessionId]() {
-                Hermes::ServiceDescriptionData reply;
-                reply.m_machineId = THIS_MACHINE_ID;
-                reply.m_laneId    = 1;
-
-                std::cout << "[RPi2] Sending ServiceDescription back to RPi1\n";
-                g_downstream->Signal(sessionId, reply);
-                std::cout << "[RPi2] ** Hermes connection established successfully **\n";
-            });
-        }
-    }
-
-    // These are required by the interface — not used in this demo
-    void On(unsigned, Hermes::EState, const Hermes::MachineReadyData&) override {}
-    void On(unsigned, Hermes::EState, const Hermes::RevokeMachineReadyData&) override {}
-    void On(unsigned, Hermes::EState, const Hermes::StartTransportData&) override {}
-    void On(unsigned, Hermes::EState, const Hermes::StopTransportData&) override {}
-
-    void On(unsigned sessionId, const Hermes::NotificationData& data) override
-    {
-        std::cout << "[RPi2] Notification from RPi1: " << data.m_description << "\n";
-    }
-
-    void On(unsigned, const Hermes::CheckAliveData&) override {}
-
-    void On(unsigned, const Hermes::CommandData&) override {}
-
-    void OnState(unsigned sessionId, Hermes::EState state) override
-    {
-        std::cout << "[RPi2] State changed: " << static_cast<int>(state) << "\n";
-    }
-
-    void OnDisconnected(unsigned sessionId, Hermes::EState state,
-                        const Hermes::Error& error) override
-    {
-        std::cout << "[RPi2] RPi1 disconnected";
-        if (error)
-            std::cout << "  reason=" << error.m_text;
-        std::cout << "\n";
-        g_activeSession = 0;
-    }
-
-    void OnTrace(unsigned, Hermes::ETraceType, Hermes::StringView) override
-    {
-        // Uncomment to see full protocol trace:
-        // std::cout << "[RPi2][TRACE] " << std::string(trace) << "\n";
-    }
-};
+static std::atomic<bool> g_running{true};
 
 int main()
 {
-    std::signal(SIGINT,  signalHandler);
-    std::signal(SIGTERM, signalHandler);
+    std::signal(SIGINT, [](int) { g_running = false; });
 
-    std::cout << "[RPi2] Starting Hermes Downstream\n";
-    std::cout << "[RPi2] Listening on port " << HERMES_PORT
-              << " for RPi1...\n";
+    Hermes::Modern::Downstream ds(1); // lane 1
 
-    DownstreamCallback callback;
-    Hermes::Downstream downstream(1, callback);  // lane 1
-    g_downstream = &downstream;
-
-    // Settings: who we are, and which port to listen on
-    // m_optionalClientAddress is left empty = accept from any IP
-    Hermes::DownstreamSettings settings;
-    settings.m_machineId   = THIS_MACHINE_ID;
-    settings.m_port        = HERMES_PORT;
-    settings.m_checkAlivePeriodInSeconds  = 60.0;
-    settings.m_reconnectWaitTimeInSeconds = 5.0;
-
-    downstream.Enable(settings);
-
-    // Run Hermes event loop in a background thread
-    std::thread networkThread([&downstream]() {
-        downstream.Run();
+    // --- Connection events ---
+    ds.RegisterConnectedCallback([](unsigned sessionId, const Hermes::ConnectionInfo& info) {
+        std::cout << "[DS] Upstream connected from " << info.m_address << "\n";
     });
 
-    std::cout << "[RPi2] Running. Press Ctrl+C to stop.\n";
+    ds.RegisterDisconnectedCallback([](unsigned sessionId, const Hermes::Error& err) {
+        std::cout << "[DS] Upstream disconnected\n";
+    });
 
+    ds.RegisterStateChangeCallback([](unsigned sessionId, Hermes::EState state) {
+        std::cout << "[DS] State: " << state << "\n";
+    });
+
+    // --- Receive ServiceDescription from Upstream, reply with ours ---
+    ds.RegisterServiceDescriptionCallback(
+        [&ds](unsigned sessionId, Hermes::EState, const Hermes::ServiceDescriptionData& data) {
+            std::cout << "[DS] Received ServiceDescription from: " << data.m_machineId << "\n";
+
+            // Reply with our own ServiceDescription
+            ds.Post([&ds, sessionId]() {
+                Hermes::ServiceDescriptionData reply;
+                reply.m_machineId = "Machine-Downstream";
+                reply.m_laneId    = 1;
+                ds.Signal(sessionId, reply);
+                std::cout << "[DS] Sent ServiceDescription\n";
+            });
+        });
+
+    // --- When Upstream is MachineReady, send BoardAvailable ---
+    ds.RegisterMachineReadyCallback(
+        [&ds](unsigned sessionId, Hermes::EState, const Hermes::MachineReadyData&) {
+            std::cout << "[DS] Upstream is MachineReady — sending BoardAvailable\n";
+
+            ds.Post([&ds, sessionId]() {
+                Hermes::BoardAvailableData board;
+                board.m_boardId          = "PCB-2024-001";
+                board.m_boardIdCreatedBy = "Machine-Downstream";
+                board.m_failedBoard      = Hermes::EBoardQuality::eGOOD;
+                board.m_flippedBoard     = Hermes::EFlippedBoard::eTOP_SIDE_IS_UP;
+                ds.Signal(sessionId, board);
+            });
+        });
+
+    // --- When Upstream starts transport, confirm when done ---
+    ds.RegisterStartTransportCallback(
+        [&ds](unsigned sessionId, Hermes::EState, const Hermes::StartTransportData& data) {
+            std::cout << "[DS] StartTransport for board: " << data.m_boardId << "\n";
+
+            // Simulate board moving
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+
+            ds.Post([&ds, sessionId, boardId = data.m_boardId]() {
+                Hermes::TransportFinishedData finished;
+                finished.m_transferState = Hermes::ETransferState::eCOMPLETE;
+                finished.m_boardId       = boardId;
+                ds.Signal(sessionId, finished);
+                std::cout << "[DS] TransportFinished sent\n";
+            });
+        });
+
+    // --- Notifications ---
+    ds.RegisterNotificationCallback([](unsigned, const Hermes::NotificationData& n) {
+        std::cout << "[DS] Notification: " << n.m_description << "\n";
+    });
+
+    // --- Start ---
+    Hermes::DownstreamSettings settings;
+    settings.m_machineId = "Machine-Downstream";
+    settings.m_port      = 50100;
+    ds.Enable(settings);
+
+    std::cout << "[DS] Listening on port 50100. Ctrl+C to stop.\n";
     while (g_running)
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    std::cout << "[RPi2] Shutting down...\n";
-    downstream.Stop();
-    if (networkThread.joinable())
-        networkThread.join();
-
-    g_downstream = nullptr;
-    std::cout << "[RPi2] Done.\n";
+    ds.Stop();
     return 0;
 }
