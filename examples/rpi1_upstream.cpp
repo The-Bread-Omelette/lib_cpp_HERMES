@@ -80,11 +80,11 @@ int main()
     // EDIT THIS — set the downstream machine's IP:
     Hermes::UpstreamSettings settings;
     settings.m_machineId   = "Machine-Upstream";
-    settings.m_hostAddress = "192.168.1.2";  // <-- downstream machine IP
+    settings.m_hostAddress = "10.0.0.2";  // <-- downstream machine IP
     settings.m_port        = 50100;
     us.Enable(settings);
 
-    std::cout << "[US] Connecting to 192.168.1.2:50100. Ctrl+C to stop.\n";
+    std::cout << "[US] Connecting to :50100. Ctrl+C to stop.\n";
     while (g_running)
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
