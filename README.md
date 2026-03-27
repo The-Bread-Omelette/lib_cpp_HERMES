@@ -1,93 +1,141 @@
-Hermes C++ Library (lib_cpp)
-The Hermes Standard (IPC-HERMES-9852) is the modern, non-proprietary TCP/IP and XML-based successor to the legacy SMEMA standard. It enables vendor-independent machine-to-machine communication in SMT assembly lines. This repository provides the official, high-performance C++ implementation of the protocol.
+# Hermes C++ Library — Complete Reference
 
-1. Core Repository Map
-To navigate the library effectively, refer to the following directory structure:
+**Protocol:** The Hermes Standard — vendor-independent machine-to-machine communication for SMT assembly lines  
+**License:** Apache 2.0  
+**Requires:** C++17, Boost 1.66+, CMake 3.15+
 
-src/include/: The Public API. This directory contains the headers required to integrate Hermes into your application.
+---
 
-Hermes.hpp: The primary Object-Oriented C++ wrapper.
+## Table of Contents
 
-Hermes.h: The low-level C-style API.
+1. [What is Hermes](#1-what-is-hermes)
+2. [Architecture overview](#2-architecture-overview)
+3. [Building the library](#3-building-the-library)
+4. [Header map — what to include](#4-header-map)
+5. [Core types reference](#5-core-types-reference)
+6. [Modern C++ API — HermesModern.hpp](#6-modern-c-api)
+7. [Low-level C++ API — Hermes.hpp](#7-low-level-c-api)
+8. [Serialization API — HermesSerialization.hpp](#8-serialization-api)
+9. [Configuration service](#9-configuration-service)
+10. [Vertical interface](#10-vertical-interface)
+11. [Complete examples](#11-complete-examples)
+12. [Bugs fixed in this version](#12-bugs-fixed)
 
-src/Hermes/: The Implementation. Contains the core logic, including the ASIO networking stack, XML serialization, and the standard-compliant state machines.
+---
 
-test/BoostTestHermes/: Verification Suite. Contains comprehensive unit and integration tests. This is the source of truth for protocol-compliant behavior.
+## 1. What is Hermes
 
-References/: External Headers. Contains local versions of pugixml and boost headers necessary for compilation in restricted environments.
+Hermes is an open TCP/IP + XML protocol that connects machines in an electronics assembly line. Each machine has an **Upstream** port (faces the previous machine) and a **Downstream** port (faces the next machine). PCB boards flow from Upstream to Downstream along the lane.
 
-2. Technical Requirements
-Dependencies
-C++ Standard: C++17 or higher.
+```
+[Machine A] --downstream:50100--> [Machine B] --downstream:50101--> [Machine C]
+             <--upstream:50100---              <--upstream:50101---
+```
 
-Networking: Boost.ASIO (v1.66 through v1.78 recommended).
+The Downstream machine **listens** on a port. The Upstream machine **connects** to it. So:
 
-Note: Versions 1.87+ require the -DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT flag.
+- `Hermes::Downstream` / `Modern::Downstream` — **server role**, listens for incoming connections
+- `Hermes::Upstream` / `Modern::Upstream` — **client role**, connects to the downstream machine
 
-XML Processing: pugixml (included in References/).
+---
 
-Platform Independence
-The library is designed to be fully platform-independent. It supports:
+## 2. Architecture overview
 
-Windows: MSVC (2017+) and MinGW-w64.
+```
+Your application
+      |
+      |--- HermesModern.hpp     (std::function callbacks — recommended)
+      |--- Hermes.hpp           (virtual interface callbacks — advanced)
+      |--- HermesSerialization  (XML serialize/deserialize)
+      |
+      +---> Hermes C API (Hermes.h / HermesData.h)
+      |         compiled into libhermes.so
+      |
+      +---> Boost.Asio (networking)
+      +---> pugixml (XML parsing)
+```
 
-Linux: GCC (7+) and Clang.
+### Message flow — horizontal (machine to machine)
 
-Build System: The project utilizes CMake (3.15+) to generate native build files (Visual Studio Solutions or Makefiles) for your specific platform.
+```
+Downstream machine                    Upstream machine
+(Modern::Downstream)                  (Modern::Upstream)
+        |                                     |
+        |<-- TCP connect -------------------- |
+        |                                     |
+        |<-- ServiceDescription ------------- |  (Upstream identifies itself)
+        |--> ServiceDescription -----------> |  (Downstream identifies itself)
+        |                                     |
+        |<-- MachineReady ------------------- |  (Upstream ready to receive)
+        |--> BoardAvailable --------------> |  (Downstream has a board)
+        |                                     |
+        |<-- StartTransport ----------------- |  (Upstream says: send it)
+        |  [board physically moves]           |
+        |--> TransportFinished -----------> |  (Downstream confirms done)
+        |                                     |
+        |<-- StopTransport  ---------------- |  (Upstream confirms received)
+```
 
-3. Unified Build Process (CMake)
-To build the library on any platform, use the following standard workflow:
+### Who receives what
 
-Generate: mkdir build && cd build && cmake ..
+| You create        | You listen for (receive)                                          | You send                                              |
+|-------------------|-------------------------------------------------------------------|-------------------------------------------------------|
+| `Modern::Downstream` | `ServiceDescription`, `MachineReady`, `RevokeMachineReady`, `StartTransport`, `StopTransport`, `QueryBoardInfo` | `ServiceDescription`, `BoardAvailable`, `RevokeBoardAvailable`, `TransportFinished`, `BoardForecast`, `SendBoardInfo` |
+| `Modern::Upstream`   | `ServiceDescription`, `BoardAvailable`, `RevokeBoardAvailable`, `TransportFinished`, `BoardForecast`, `SendBoardInfo` | `ServiceDescription`, `MachineReady`, `RevokeMachineReady`, `StartTransport`, `StopTransport`, `QueryBoardInfo` |
 
-Build: cmake --build . --config Release
+---
 
-Outputs:
+## 3. Building the library
 
-hermes.dll / hermes.lib (Windows)
+### Prerequisites
 
-libhermes.so (Linux)
+```bash
+# Debian / Ubuntu / Raspberry Pi OS
+sudo apt install -y g++ cmake libboost-all-dev
 
-4. API Architecture & Design
-The Callback Model
-The C++ API follows a strict Interface-Based Callback pattern.
+# macOS
+brew install cmake boost
 
-Users must implement classes inheriting from IDownstreamCallback (Receivers) or IUpstreamCallback (Senders).
+# Windows
+# Install Boost via vcpkg: vcpkg install boost
+```
 
-All pure virtual methods in these interfaces must be overridden to handle protocol events (Connection, Disconnection, Board Available, Machine Ready, etc.).
+### Build
 
-Execution Model
-Blocking Event Loop: The core processing occurs within the Run() method.
+```bash
+git clone https://github.com/hermes-org/lib_cpp.git
+cd lib_cpp
+mkdir build && cd build
+cmake ..
+make -j4
+```
 
-Threading: Because Run() blocks the calling thread to process network I/O, it must be executed in a dedicated background thread to maintain application responsiveness.
+This produces `build/src/Hermes/libhermes.so` (Linux/macOS) or `hermes.dll` (Windows).
 
-State Management: The library handles all internal state transitions (e.g., Not Connected -> Service Description -> Not Ready -> Ready) automatically based on the Enable() configuration.
+### Compile your application
 
-5. Supported Communication Channels
-The library implements the four primary channels defined by IPC-HERMES-9852:
+```bash
+g++ -std=c++17 -o myapp myapp.cpp \
+    -I./src/include \
+    -L./build/src/Hermes -lhermes \
+    -lboost_system -lpthread
+#change the commands according to your OS
 
-Upstream: Machine-to-Machine (Sending).
+# Run (Linux — tell the linker where to find the .so)
+LD_LIBRARY_PATH=./build/src/Hermes ./myapp
+```
 
-Downstream: Machine-to-Machine (Receiving).
+---
 
-Configuration: Exchange of machine capabilities and line settings.
+## 4. Header map
 
-Vertical: Communication with factory-level MES/ERP systems.
+| Header | What it gives you | When to include it |
+|--------|------------------|--------------------|
+| `HermesModern.hpp` | `Modern::Downstream`, `Modern::Upstream` with std::function callbacks | **Start here. Recommended for all new code.** |
+| `Hermes.hpp` | `Hermes::Downstream`, `Hermes::Upstream`, virtual callback interfaces | When you need session IDs, raw XML, or fine-grained control |
+| `HermesData.hpp` | All C++ data structs, enums, settings structs | Included automatically by the above |
+| `HermesSerialization.hpp` | `ToXml()`, `FromXml<T>()` | When you need to inspect or log raw XML messages |
+| `HermesOptional.hpp` | `Hermes::Optional<T>` = `std::optional<T>` | Included automatically |
+| `HermesStringView.hpp` | `Hermes::StringView` = `std::string_view` | Included automatically |
 
-6. Deployment Topologies
-The library supports standard IPv4 networking across various hardware setups:
-
-Point-to-Point: Direct Ethernet connection between two machines.
-
-Switched Fabric: Deployment via factory-wide network switches. This is the preferred method for modern "Smart Factory" environments, as it allows a single network interface to handle both horizontal (machine) and vertical (MES) data simultaneously.
-
-7. Quality Assurance
-All protocol features are verified against the BoostTestHermes suite.
-
-Unit Tests: Verify individual XML serialization and data structures.
-
-Integration Tests: Simulate full handshakes between virtual Upstream and Downstream sessions.
-
-Automation: Compatible with ctest for continuous integration workflows.
-
-License: Copyright (c) ASM Assembly Systems GmbH & Co. KG. Licensed under the Apache License, Version 2.0. See COPYRIGHT.txt for details.
+---
