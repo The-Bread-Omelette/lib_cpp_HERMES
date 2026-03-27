@@ -16,11 +16,15 @@ limitations under the License.
 
 // Copyright (c) ASM Assembly Systems GmbH & Co. KG
 //
-// FIX: The original file rolled its own Optional class to avoid C++11/Boost
-// dependencies. Since this library now requires C++17 (enforced in CMakeLists),
-// we use std::optional directly. This removes the custom implementation entirely
-// and fixes the two-argument constructor mismatch that caused compile errors in
-// HermesDataConversion.hpp (Optional<std::string>{data.m_pData, data.m_size}).
+// FIX: Replaced the custom Optional<T> class with std::optional<T>.
+// The library requires C++17 (enforced in CMakeLists.txt), so std::optional
+// is always available.
+//
+// FIX: Added operator<< for std::optional<T> in the Hermes namespace.
+// The internal implementation files (AsioServer.cpp etc.) use BuildString()
+// which calls operator<< on every argument. The old custom Optional<T> had
+// operator<< defined on it. std::optional does not. Adding it here restores
+// that behaviour without modifying any internal .cpp files.
 //
 #pragma once
 
@@ -29,7 +33,7 @@ limitations under the License.
 
 namespace Hermes
 {
-    // Drop-in alias — all code using Hermes::Optional<T> continues to compile.
+    // Drop-in alias — all code using Hermes::Optional<T> compiles unchanged.
     template<class T>
     using Optional = std::optional<T>;
 

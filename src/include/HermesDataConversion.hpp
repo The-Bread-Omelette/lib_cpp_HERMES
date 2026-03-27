@@ -23,31 +23,26 @@ limitations under the License.
 namespace Hermes
 {
     // Verify constants match between C and C++ headers
-    static_assert(cCONFIG_PORT == cHERMES_CONFIG_PORT, "");
-    static_assert(cBASE_PORT == cHERMES_BASE_PORT, "");
-    static_assert(cMAX_MESSAGE_SIZE == cHERMES_MAX_MESSAGE_SIZE, "");
+    static_assert(cCONFIG_PORT     == cHERMES_CONFIG_PORT,      "config port mismatch");
+    static_assert(cBASE_PORT       == cHERMES_BASE_PORT,        "base port mismatch");
+    static_assert(cMAX_MESSAGE_SIZE == cHERMES_MAX_MESSAGE_SIZE, "max message size mismatch");
 
     // -------------------------------------------------------------------------
     // String conversions
-    // FIX: HermesStringView now has m_pData and m_size (fixed in HermesStringView.h)
-    // FIX: std::optional<string> uses value_or and has_value instead of custom Optional
     // -------------------------------------------------------------------------
     inline void CppToC(const std::string& data, HermesStringView& result)
     {
         result.m_pData = data.data();
         result.m_size  = data.size();
     }
-
     inline void CToCpp(HermesStringView data, std::string& result)
     {
         result.assign(data.m_pData, data.m_size);
     }
-
     inline HermesStringView ToC(StringView data)
     {
         return { data.data(), data.size() };
     }
-
     inline StringView ToCpp(HermesStringView data)
     {
         return { data.m_pData, data.m_size };
@@ -55,37 +50,26 @@ namespace Hermes
 
     inline void CppToC(const Optional<std::string>& data, HermesStringView& result)
     {
-        if (data.has_value())
-        {
-            result.m_pData = data->data();
-            result.m_size  = data->size();
-        }
-        else
-        {
-            result.m_pData = nullptr;
-            result.m_size  = 0;
-        }
+        if (data.has_value()) { result.m_pData = data->data(); result.m_size = data->size(); }
+        else                  { result.m_pData = nullptr;      result.m_size = 0; }
     }
-
     inline void CToCpp(HermesStringView data, Optional<std::string>& result)
     {
-        if (data.m_pData)
-            result = std::string(data.m_pData, data.m_size);
-        else
-            result = std::nullopt;
+        result = data.m_pData ? Optional<std::string>(std::in_place, data.m_pData, data.m_size)
+                              : std::nullopt;
     }
 
     // -------------------------------------------------------------------------
     // Scalar pass-throughs
+    // FIX: removed separate uint32_t overload — on ARM/RPi, unsigned == uint32_t,
+    // causing a redefinition error. One overload covers both.
     // -------------------------------------------------------------------------
-    inline void CppToC(double data,   double&   result) { result = data; }
-    inline void CToCpp(double data,   double&   result) { result = data; }
-    inline void CppToC(unsigned data, unsigned& result) { result = data; }
-    inline void CToCpp(unsigned data, unsigned& result) { result = data; }
+    inline void CppToC(double   data, double&   result) { result = data; }
+    inline void CToCpp(double   data, double&   result) { result = data; }
     inline void CppToC(uint16_t data, uint16_t& result) { result = data; }
     inline void CToCpp(uint16_t data, uint16_t& result) { result = data; }
-    inline void CppToC(uint32_t data, uint32_t& result) { result = data; }
-    inline void CToCpp(uint32_t data, uint32_t& result) { result = data; }
+    inline void CppToC(unsigned data, unsigned& result)  { result = data; }
+    inline void CToCpp(unsigned data, unsigned& result)  { result = data; }
 
     // -------------------------------------------------------------------------
     // Optional pointer conversions
@@ -93,8 +77,7 @@ namespace Hermes
     template<class CT, class CppT>
     void CToCpp(const CT* pData, CppT& result)
     {
-        if (!pData) return;
-        CToCpp(*pData, result);
+        if (pData) CToCpp(*pData, result);
     }
 
     template<class T>
@@ -107,18 +90,9 @@ namespace Hermes
     void CToCpp(const CT* pData, Optional<CppT>& result)
     {
         if (!pData) { result = std::nullopt; return; }
-        CppT value{};
-        CToCpp(*pData, value);
-        result = std::move(value);
-    }
-
-    template<class CppT, class CT>
-    void CppToC(const Optional<CppT>& data, Optional<CT>& result)
-    {
-        if (!data.has_value()) { result = std::nullopt; return; }
-        CT c{};
-        CppToC(*data, c);
-        result = std::move(c);
+        CppT v{};
+        CToCpp(*pData, v);
+        result = std::move(v);
     }
 
     template<class CppT, class CT>
@@ -139,15 +113,6 @@ namespace Hermes
         std::vector<const CT*> m_pointers;
     };
 
-    template<class CppT, class CT>
-    void CppToC(const std::vector<CppT>& data, VectorHolder<CT>& result)
-    {
-        auto sz = data.size();
-        result.m_values.resize(sz, CT{});
-        for (uint32_t i = 0; i < sz; ++i)
-            CppToC(data[i], result.m_values[i]);
-    }
-
     template<class CppT, class CT, class CVector>
     void CppToC(const std::vector<CppT>& data, VectorHolder<CT>& intermediate, CVector& result)
     {
@@ -159,7 +124,7 @@ namespace Hermes
             CppToC(data[i], intermediate.m_values[i]);
             intermediate.m_pointers[i] = &intermediate.m_values[i];
         }
-        result.m_pData = (sz == 0) ? nullptr : intermediate.m_pointers.data();
+        result.m_pData = sz == 0 ? nullptr : intermediate.m_pointers.data();
         result.m_size  = sz;
     }
 
@@ -172,89 +137,90 @@ namespace Hermes
     }
 
     // -------------------------------------------------------------------------
-    // Enum conversions — static_assert verifies C and C++ enums stay in sync
+    // Enum conversions
     // -------------------------------------------------------------------------
     static_assert(size(EState())    == cHERMES_STATE_ENUM_SIZE,      "enum mismatch");
-    inline EHermesState ToC(EState data)        { return static_cast<EHermesState>(data); }
-    inline EState ToCpp(EHermesState data)      { return static_cast<EState>(data); }
+    inline EHermesState ToC(EState d)       { return static_cast<EHermesState>(d); }
+    inline EState ToCpp(EHermesState d)     { return static_cast<EState>(d); }
 
     static_assert(size(ETraceType()) == cHERMES_TRACE_TYPE_ENUM_SIZE, "enum mismatch");
-    inline EHermesTraceType ToC(ETraceType data)       { return static_cast<EHermesTraceType>(data); }
-    inline ETraceType ToCpp(EHermesTraceType data)     { return static_cast<ETraceType>(data); }
+    inline EHermesTraceType ToC(ETraceType d)      { return static_cast<EHermesTraceType>(d); }
+    inline ETraceType ToCpp(EHermesTraceType d)    { return static_cast<ETraceType>(d); }
 
     static_assert(size(ECheckAliveType()) == cHERMES_CHECK_ALIVE_TYPE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ECheckAliveType data, EHermesCheckAliveType& r) { r = static_cast<EHermesCheckAliveType>(data); }
-    inline void CToCpp(EHermesCheckAliveType data, ECheckAliveType& r) { r = static_cast<ECheckAliveType>(data); }
+    inline void CppToC(ECheckAliveType d, EHermesCheckAliveType& r)  { r = static_cast<EHermesCheckAliveType>(d); }
+    inline void CToCpp(EHermesCheckAliveType d, ECheckAliveType& r)  { r = static_cast<ECheckAliveType>(d); }
 
     static_assert(size(EBoardQuality()) == cHERMES_BOARD_QUALITY_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EBoardQuality data, EHermesBoardQuality& r) { r = static_cast<EHermesBoardQuality>(data); }
-    inline void CToCpp(EHermesBoardQuality data, EBoardQuality& r) { r = static_cast<EBoardQuality>(data); }
+    inline void CppToC(EBoardQuality d, EHermesBoardQuality& r)  { r = static_cast<EHermesBoardQuality>(d); }
+    inline void CToCpp(EHermesBoardQuality d, EBoardQuality& r)  { r = static_cast<EBoardQuality>(d); }
 
     static_assert(size(EFlippedBoard()) == cHERMES_FLIPPED_BOARD_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EFlippedBoard data, EHermesFlippedBoard& r) { r = static_cast<EHermesFlippedBoard>(data); }
-    inline void CToCpp(EHermesFlippedBoard data, EFlippedBoard& r) { r = static_cast<EFlippedBoard>(data); }
+    inline void CppToC(EFlippedBoard d, EHermesFlippedBoard& r)  { r = static_cast<EHermesFlippedBoard>(d); }
+    inline void CToCpp(EHermesFlippedBoard d, EFlippedBoard& r)  { r = static_cast<EFlippedBoard>(d); }
 
     static_assert(size(ESubBoardState()) == cHERMES_SUB_BOARD_STATE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ESubBoardState data, EHermesSubBoardState& r) { r = static_cast<EHermesSubBoardState>(data); }
-    inline void CToCpp(EHermesSubBoardState data, ESubBoardState& r) { r = static_cast<ESubBoardState>(data); }
+    inline void CppToC(ESubBoardState d, EHermesSubBoardState& r)  { r = static_cast<EHermesSubBoardState>(d); }
+    inline void CToCpp(EHermesSubBoardState d, ESubBoardState& r)  { r = static_cast<ESubBoardState>(d); }
 
     static_assert(size(ETransferState()) == cHERMES_TRANSFER_STATE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ETransferState data, EHermesTransferState& r) { r = static_cast<EHermesTransferState>(data); }
-    inline void CToCpp(EHermesTransferState data, ETransferState& r) { r = static_cast<ETransferState>(data); }
+    inline void CppToC(ETransferState d, EHermesTransferState& r)  { r = static_cast<EHermesTransferState>(d); }
+    inline void CToCpp(EHermesTransferState d, ETransferState& r)  { r = static_cast<ETransferState>(d); }
 
     static_assert(size(ENotificationCode()) == cHERMES_NOTIFICATION_CODE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ENotificationCode data, EHermesNotificationCode& r) { r = static_cast<EHermesNotificationCode>(data); }
-    inline void CToCpp(EHermesNotificationCode data, ENotificationCode& r) { r = static_cast<ENotificationCode>(data); }
+    inline void CppToC(ENotificationCode d, EHermesNotificationCode& r)  { r = static_cast<EHermesNotificationCode>(d); }
+    inline void CToCpp(EHermesNotificationCode d, ENotificationCode& r)  { r = static_cast<ENotificationCode>(d); }
 
     static_assert(size(ESeverity()) == cHERMES_SEVERITY_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ESeverity data, EHermesSeverity& r) { r = static_cast<EHermesSeverity>(data); }
-    inline void CToCpp(EHermesSeverity data, ESeverity& r) { r = static_cast<ESeverity>(data); }
+    inline void CppToC(ESeverity d, EHermesSeverity& r)  { r = static_cast<EHermesSeverity>(d); }
+    inline void CToCpp(EHermesSeverity d, ESeverity& r)  { r = static_cast<ESeverity>(d); }
 
     static_assert(size(ECheckState()) == cHERMES_CHECK_STATE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ECheckState data, EHermesCheckState& r) { r = static_cast<EHermesCheckState>(data); }
-    inline void CToCpp(EHermesCheckState data, ECheckState& r) { r = static_cast<ECheckState>(data); }
+    inline void CppToC(ECheckState d, EHermesCheckState& r)  { r = static_cast<EHermesCheckState>(d); }
+    inline void CToCpp(EHermesCheckState d, ECheckState& r)  { r = static_cast<ECheckState>(d); }
 
     static_assert(size(EErrorCode()) == cHERMES_ERROR_CODE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EErrorCode data, EHermesErrorCode& r) { r = static_cast<EHermesErrorCode>(data); }
-    inline void CToCpp(EHermesErrorCode data, EErrorCode& r) { r = static_cast<EErrorCode>(data); }
+    inline void CppToC(EErrorCode d, EHermesErrorCode& r)  { r = static_cast<EHermesErrorCode>(d); }
+    inline void CToCpp(EHermesErrorCode d, EErrorCode& r)  { r = static_cast<EErrorCode>(d); }
 
     static_assert(size(ECheckAliveResponseMode()) == cHERMES_CHECK_ALIVE_RESPONSE_MODE_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(ECheckAliveResponseMode data, EHermesCheckAliveResponseMode& r) { r = static_cast<EHermesCheckAliveResponseMode>(data); }
-    inline void CToCpp(EHermesCheckAliveResponseMode data, ECheckAliveResponseMode& r) { r = static_cast<ECheckAliveResponseMode>(data); }
+    inline void CppToC(ECheckAliveResponseMode d, EHermesCheckAliveResponseMode& r)  { r = static_cast<EHermesCheckAliveResponseMode>(d); }
+    inline void CToCpp(EHermesCheckAliveResponseMode d, ECheckAliveResponseMode& r)  { r = static_cast<ECheckAliveResponseMode>(d); }
 
     static_assert(size(EBoardArrivedTransfer()) == cHERMES_BOARD_ARRIVED_TRANSFER_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EBoardArrivedTransfer data, EHermesBoardArrivedTransfer& r) { r = static_cast<EHermesBoardArrivedTransfer>(data); }
-    inline void CToCpp(EHermesBoardArrivedTransfer data, EBoardArrivedTransfer& r) { r = static_cast<EBoardArrivedTransfer>(data); }
+    inline void CppToC(EBoardArrivedTransfer d, EHermesBoardArrivedTransfer& r)  { r = static_cast<EHermesBoardArrivedTransfer>(d); }
+    inline void CToCpp(EHermesBoardArrivedTransfer d, EBoardArrivedTransfer& r)  { r = static_cast<EBoardArrivedTransfer>(d); }
 
     static_assert(size(EBoardDepartedTransfer()) == cHERMES_BOARD_DEPARTED_TRANSFER_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EBoardDepartedTransfer data, EHermesBoardDepartedTransfer& r) { r = static_cast<EHermesBoardDepartedTransfer>(data); }
-    inline void CToCpp(EHermesBoardDepartedTransfer data, EBoardDepartedTransfer& r) { r = static_cast<EBoardDepartedTransfer>(data); }
+    inline void CppToC(EBoardDepartedTransfer d, EHermesBoardDepartedTransfer& r)  { r = static_cast<EHermesBoardDepartedTransfer>(d); }
+    inline void CToCpp(EHermesBoardDepartedTransfer d, EBoardDepartedTransfer& r)  { r = static_cast<EBoardDepartedTransfer>(d); }
 
     static_assert(size(EReplyWorkOrderInfoStatus()) == cHERMES_REPLY_WORK_ORDER_INFO_STATUS_ENUM_SIZE, "enum mismatch");
-    inline void CppToC(EReplyWorkOrderInfoStatus data, EHermesReplyWorkOrderInfoStatus& r) { r = static_cast<EHermesReplyWorkOrderInfoStatus>(data); }
-    inline void CToCpp(EHermesReplyWorkOrderInfoStatus data, EReplyWorkOrderInfoStatus& r) { r = static_cast<EReplyWorkOrderInfoStatus>(data); }
+    inline void CppToC(EReplyWorkOrderInfoStatus d, EHermesReplyWorkOrderInfoStatus& r)  { r = static_cast<EHermesReplyWorkOrderInfoStatus>(d); }
+    inline void CToCpp(EHermesReplyWorkOrderInfoStatus d, EReplyWorkOrderInfoStatus& r)  { r = static_cast<EReplyWorkOrderInfoStatus>(d); }
 
     static_assert(size(EVerticalState()) == cHERMES_VERTICAL_STATE_ENUM_SIZE, "enum mismatch");
-    inline EHermesVerticalState ToC(EVerticalState data)      { return static_cast<EHermesVerticalState>(data); }
-    inline EVerticalState ToCpp(EHermesVerticalState data)    { return static_cast<EVerticalState>(data); }
+    inline EHermesVerticalState ToC(EVerticalState d)      { return static_cast<EHermesVerticalState>(d); }
+    inline EVerticalState ToCpp(EHermesVerticalState d)    { return static_cast<EVerticalState>(d); }
 
     // -------------------------------------------------------------------------
-    // Forward declarations — specialisations defined below
+    // Forward declarations
     // -------------------------------------------------------------------------
     template<class T> struct Converter2C;
     template<class T> struct ConverterBase
     {
         ConverterBase() = default;
-        ConverterBase(const ConverterBase&) = delete;
-        ConverterBase(ConverterBase&&)      = delete;
+        ConverterBase(const ConverterBase&)            = delete;
+        ConverterBase(ConverterBase&&)                 = delete;
         ConverterBase& operator=(const ConverterBase&) = delete;
         ConverterBase& operator=(ConverterBase&&)      = delete;
-
         const T* CPointer() const { return &m_data; }
         T m_data{};
     };
 
-    // UpstreamConfiguration
+    // -------------------------------------------------------------------------
+    // UpstreamConfiguration / DownstreamConfiguration
+    // -------------------------------------------------------------------------
     inline void CppToC(const UpstreamConfiguration& data, HermesUpstreamConfiguration& result)
     {
         CppToC(data.m_upstreamLaneId,              result.m_upstreamLaneId);
@@ -270,7 +236,6 @@ namespace Hermes
         CToCpp(data.m_port,                        result.m_port);
     }
 
-    // DownstreamConfiguration
     inline void CppToC(const DownstreamConfiguration& data, HermesDownstreamConfiguration& result)
     {
         CppToC(data.m_downstreamLaneId,              result.m_downstreamLaneId);
@@ -286,16 +251,18 @@ namespace Hermes
         CToCpp(data.m_port,                          result.m_port);
     }
 
+    // -------------------------------------------------------------------------
     // SetConfigurationData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<SetConfigurationData> : ConverterBase<HermesSetConfigurationData>
     {
         explicit Converter2C(const SetConfigurationData& data)
         {
-            CppToC(data.m_machineId,                 m_data.m_machineId);
+            CppToC(data.m_machineId,                     m_data.m_machineId);
             CppToC(data.m_optionalSupervisorySystemPort, m_data.m_pOptionalSupervisorySystemPort);
-            CppToC(data.m_upstreamConfigurations,    m_upstreamHolder,   m_data.m_upstreamConfigurations);
-            CppToC(data.m_downstreamConfigurations,  m_downstreamHolder, m_data.m_downstreamConfigurations);
+            CppToC(data.m_upstreamConfigurations,   m_upstreamHolder,   m_data.m_upstreamConfigurations);
+            CppToC(data.m_downstreamConfigurations, m_downstreamHolder, m_data.m_downstreamConfigurations);
         }
     private:
         VectorHolder<HermesUpstreamConfiguration>   m_upstreamHolder;
@@ -304,19 +271,23 @@ namespace Hermes
     inline SetConfigurationData ToCpp(const HermesSetConfigurationData& data)
     {
         SetConfigurationData result;
-        CToCpp(data.m_machineId,                 result.m_machineId);
+        CToCpp(data.m_machineId,                      result.m_machineId);
         CToCpp(data.m_pOptionalSupervisorySystemPort, result.m_optionalSupervisorySystemPort);
-        CToCpp(data.m_upstreamConfigurations,    result.m_upstreamConfigurations);
-        CToCpp(data.m_downstreamConfigurations,  result.m_downstreamConfigurations);
+        CToCpp(data.m_upstreamConfigurations,         result.m_upstreamConfigurations);
+        CToCpp(data.m_downstreamConfigurations,       result.m_downstreamConfigurations);
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // GetConfigurationData
+    // -------------------------------------------------------------------------
     template<> struct Converter2C<GetConfigurationData> : ConverterBase<HermesGetConfigurationData>
     { explicit Converter2C(const GetConfigurationData&) {} };
     inline GetConfigurationData ToCpp(const HermesGetConfigurationData&) { return {}; }
 
+    // -------------------------------------------------------------------------
     // CurrentConfigurationData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<CurrentConfigurationData> : ConverterBase<HermesCurrentConfigurationData>
     {
@@ -324,8 +295,8 @@ namespace Hermes
         {
             CppToC(data.m_optionalMachineId,             m_data.m_optionalMachineId);
             CppToC(data.m_optionalSupervisorySystemPort, m_data.m_pOptionalSupervisorySystemPort);
-            CppToC(data.m_upstreamConfigurations,        m_upstreamHolder,   m_data.m_upstreamConfigurations);
-            CppToC(data.m_downstreamConfigurations,      m_downstreamHolder, m_data.m_downstreamConfigurations);
+            CppToC(data.m_upstreamConfigurations,   m_upstreamHolder,   m_data.m_upstreamConfigurations);
+            CppToC(data.m_downstreamConfigurations, m_downstreamHolder, m_data.m_downstreamConfigurations);
         }
     private:
         VectorHolder<HermesUpstreamConfiguration>   m_upstreamHolder;
@@ -334,14 +305,16 @@ namespace Hermes
     inline CurrentConfigurationData ToCpp(const HermesCurrentConfigurationData& data)
     {
         CurrentConfigurationData result;
-        CToCpp(data.m_optionalMachineId,             result.m_optionalMachineId);
+        CToCpp(data.m_optionalMachineId,              result.m_optionalMachineId);
         CToCpp(data.m_pOptionalSupervisorySystemPort, result.m_optionalSupervisorySystemPort);
-        CToCpp(data.m_upstreamConfigurations,        result.m_upstreamConfigurations);
-        CToCpp(data.m_downstreamConfigurations,      result.m_downstreamConfigurations);
+        CToCpp(data.m_upstreamConfigurations,         result.m_upstreamConfigurations);
+        CToCpp(data.m_downstreamConfigurations,       result.m_downstreamConfigurations);
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // ConnectionInfo
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<ConnectionInfo> : ConverterBase<HermesConnectionInfo>
     {
@@ -361,7 +334,10 @@ namespace Hermes
         return result;
     }
 
-    // FIX: Was Converter2C<e> — typo, must be Converter2C<Error>
+    // -------------------------------------------------------------------------
+    // Error
+    // FIX: was Converter2C<e> (typo) — corrected to Converter2C<Error>
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<Error> : ConverterBase<HermesError>
     {
@@ -379,17 +355,19 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // CheckAliveData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<CheckAliveData> : ConverterBase<HermesCheckAliveData>
     {
         explicit Converter2C(const CheckAliveData& data)
         {
-            CppToC(data.m_optionalType, m_optionalType, m_data.m_pOptionalType);
+            CppToC(data.m_optionalType, m_optType, m_data.m_pOptionalType);
             CppToC(data.m_optionalId,   m_data.m_optionalId);
         }
     private:
-        EHermesCheckAliveType m_optionalType{};
+        EHermesCheckAliveType m_optType{};
     };
     inline CheckAliveData ToCpp(const HermesCheckAliveData& data)
     {
@@ -399,7 +377,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // NotificationData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<NotificationData> : ConverterBase<HermesNotificationData>
     {
@@ -419,17 +399,19 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // ServiceDescriptionData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<ServiceDescriptionData> : ConverterBase<HermesServiceDescriptionData>
     {
         explicit Converter2C(const ServiceDescriptionData& data)
         {
-            CppToC(data.m_machineId,          m_data.m_machineId);
-            CppToC(data.m_laneId,             m_data.m_laneId);
+            CppToC(data.m_machineId,           m_data.m_machineId);
+            CppToC(data.m_laneId,              m_data.m_laneId);
             CppToC(data.m_optionalInterfaceId, m_data.m_optionalInterfaceId);
             CppToC(data.m_version,             m_data.m_version);
-            m_data.m_pSupportedFeatures = nullptr; // features are optional, not mapped here
+            m_data.m_pSupportedFeatures = nullptr;
         }
     };
     inline ServiceDescriptionData ToCpp(const HermesServiceDescriptionData& data)
@@ -442,13 +424,10 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // SubBoard / SubBoards helper
-    struct SubBoardsHolder
-    {
-        VectorHolder<HermesSubBoard> m_holder;
-        HermesSubBoards              m_data{};
-    };
-
+    // SubBoards is typedef'd as std::vector<SubBoard> in HermesData.hpp
+    // -------------------------------------------------------------------------
     inline void CppToC(const SubBoard& data, HermesSubBoard& result)
     {
         CppToC(data.m_pos,        result.m_pos);
@@ -462,141 +441,163 @@ namespace Hermes
         CToCpp(data.m_st,         result.m_st);
     }
 
-    inline void CppToC(const std::vector<SubBoard>& data, SubBoardsHolder& holder)
+    struct SubBoardsHolder
+    {
+        VectorHolder<HermesSubBoard> m_holder;
+        HermesSubBoards              m_data{};
+    };
+    inline void CppToC(const SubBoards& data, SubBoardsHolder& holder)
     {
         CppToC(data, holder.m_holder, holder.m_data);
     }
-    inline void CToCpp(const HermesSubBoards& data, std::vector<SubBoard>& result)
+    inline void CToCpp(const HermesSubBoards& data, SubBoards& result)
     {
         CToCpp(data, result);
     }
 
+    // -------------------------------------------------------------------------
     // BoardAvailableData
+    // FIX: field names corrected to match HermesData.hpp:
+    //   m_length -> m_optionalLengthInMM
+    //   m_width  -> m_optionalWidthInMM
+    //   etc.
+    //   m_subBoards -> m_optionalSubBoards
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<BoardAvailableData> : ConverterBase<HermesBoardAvailableData>
     {
         explicit Converter2C(const BoardAvailableData& data)
         {
-            CppToC(data.m_boardId,          m_data.m_boardId);
-            CppToC(data.m_boardIdCreatedBy, m_data.m_boardIdCreatedBy);
-            CppToC(data.m_failedBoard,      m_data.m_failedBoard);
-            CppToC(data.m_optionalProductTypeId,  m_data.m_optionalProductTypeId);
-            CppToC(data.m_flippedBoard,     m_data.m_flippedBoard);
-            CppToC(data.m_optionalTopBarcode,     m_data.m_optionalTopBarcode);
-            CppToC(data.m_optionalBottomBarcode,  m_data.m_optionalBottomBarcode);
-            CppToC(data.m_length,           m_optLength,  m_data.m_pOptionalLengthInMM);
-            CppToC(data.m_width,            m_optWidth,   m_data.m_pOptionalWidthInMM);
-            CppToC(data.m_thickness,        m_optThick,   m_data.m_pOptionalThicknessInMM);
-            CppToC(data.m_conveyorSpeed,    m_optSpeed,   m_data.m_pOptionalConveyorSpeedInMMPerSecs);
-            CppToC(data.m_topClearanceHeight,    m_optTopClear,    m_data.m_pOptionalTopClearanceHeightInMM);
-            CppToC(data.m_bottomClearanceHeight, m_optBotClear,    m_data.m_pOptionalBottomClearanceHeightInMM);
-            CppToC(data.m_weight,           m_optWeight,  m_data.m_pOptionalWeightInGrams);
-            CppToC(data.m_optionalWorkOrderId,   m_data.m_optionalWorkOrderId);
-            CppToC(data.m_optionalBatchId,       m_data.m_optionalBatchId);
-            CppToC(data.m_optionalRoute,    m_optRoute,   m_data.m_pOptionalRoute);
-            CppToC(data.m_optionalAction,   m_optAction,  m_data.m_pOptionalAction);
-            CppToC(data.m_subBoards,        m_subBoardsHolder);
-            m_data.m_optionalSubBoards = m_subBoardsHolder.m_data;
+            CppToC(data.m_boardId,                    m_data.m_boardId);
+            CppToC(data.m_boardIdCreatedBy,           m_data.m_boardIdCreatedBy);
+            CppToC(data.m_failedBoard,                m_data.m_failedBoard);
+            CppToC(data.m_optionalProductTypeId,      m_data.m_optionalProductTypeId);
+            CppToC(data.m_flippedBoard,               m_data.m_flippedBoard);
+            CppToC(data.m_optionalTopBarcode,         m_data.m_optionalTopBarcode);
+            CppToC(data.m_optionalBottomBarcode,      m_data.m_optionalBottomBarcode);
+            CppToC(data.m_optionalLengthInMM,         m_optLength,   m_data.m_pOptionalLengthInMM);
+            CppToC(data.m_optionalWidthInMM,          m_optWidth,    m_data.m_pOptionalWidthInMM);
+            CppToC(data.m_optionalThicknessInMM,      m_optThick,    m_data.m_pOptionalThicknessInMM);
+            CppToC(data.m_optionalConveyorSpeedInMMPerSecs,    m_optSpeed,    m_data.m_pOptionalConveyorSpeedInMMPerSecs);
+            CppToC(data.m_optionalTopClearanceHeightInMM,      m_optTopCl,    m_data.m_pOptionalTopClearanceHeightInMM);
+            CppToC(data.m_optionalBottomClearanceHeightInMM,   m_optBotCl,    m_data.m_pOptionalBottomClearanceHeightInMM);
+            CppToC(data.m_optionalWeightInGrams,      m_optWeight,   m_data.m_pOptionalWeightInGrams);
+            CppToC(data.m_optionalWorkOrderId,        m_data.m_optionalWorkOrderId);
+            CppToC(data.m_optionalBatchId,            m_data.m_optionalBatchId);
+            CppToC(data.m_optionalRoute,              m_optRoute,    m_data.m_pOptionalRoute);
+            CppToC(data.m_optionalAction,             m_optAction,   m_data.m_pOptionalAction);
+            CppToC(data.m_optionalSubBoards,          m_subBoards);
+            m_data.m_optionalSubBoards = m_subBoards.m_data;
         }
     private:
         double   m_optLength{}, m_optWidth{}, m_optThick{}, m_optSpeed{};
-        double   m_optTopClear{}, m_optBotClear{}, m_optWeight{};
+        double   m_optTopCl{}, m_optBotCl{}, m_optWeight{};
         uint16_t m_optRoute{}, m_optAction{};
-        SubBoardsHolder m_subBoardsHolder;
+        SubBoardsHolder m_subBoards;
     };
     inline BoardAvailableData ToCpp(const HermesBoardAvailableData& data)
     {
         BoardAvailableData result;
-        CToCpp(data.m_boardId,          result.m_boardId);
-        CToCpp(data.m_boardIdCreatedBy, result.m_boardIdCreatedBy);
-        CToCpp(data.m_failedBoard,      result.m_failedBoard);
-        CToCpp(data.m_optionalProductTypeId,  result.m_optionalProductTypeId);
-        CToCpp(data.m_flippedBoard,     result.m_flippedBoard);
-        CToCpp(data.m_optionalTopBarcode,     result.m_optionalTopBarcode);
-        CToCpp(data.m_optionalBottomBarcode,  result.m_optionalBottomBarcode);
-        CToCpp(data.m_pOptionalLengthInMM,                result.m_length);
-        CToCpp(data.m_pOptionalWidthInMM,                 result.m_width);
-        CToCpp(data.m_pOptionalThicknessInMM,             result.m_thickness);
-        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs,  result.m_conveyorSpeed);
-        CToCpp(data.m_pOptionalTopClearanceHeightInMM,    result.m_topClearanceHeight);
-        CToCpp(data.m_pOptionalBottomClearanceHeightInMM, result.m_bottomClearanceHeight);
-        CToCpp(data.m_pOptionalWeightInGrams,             result.m_weight);
+        CToCpp(data.m_boardId,               result.m_boardId);
+        CToCpp(data.m_boardIdCreatedBy,      result.m_boardIdCreatedBy);
+        CToCpp(data.m_failedBoard,           result.m_failedBoard);
+        CToCpp(data.m_optionalProductTypeId, result.m_optionalProductTypeId);
+        CToCpp(data.m_flippedBoard,          result.m_flippedBoard);
+        CToCpp(data.m_optionalTopBarcode,    result.m_optionalTopBarcode);
+        CToCpp(data.m_optionalBottomBarcode, result.m_optionalBottomBarcode);
+        CToCpp(data.m_pOptionalLengthInMM,               result.m_optionalLengthInMM);
+        CToCpp(data.m_pOptionalWidthInMM,                result.m_optionalWidthInMM);
+        CToCpp(data.m_pOptionalThicknessInMM,            result.m_optionalThicknessInMM);
+        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs, result.m_optionalConveyorSpeedInMMPerSecs);
+        CToCpp(data.m_pOptionalTopClearanceHeightInMM,   result.m_optionalTopClearanceHeightInMM);
+        CToCpp(data.m_pOptionalBottomClearanceHeightInMM,result.m_optionalBottomClearanceHeightInMM);
+        CToCpp(data.m_pOptionalWeightInGrams,            result.m_optionalWeightInGrams);
         CToCpp(data.m_optionalWorkOrderId,   result.m_optionalWorkOrderId);
         CToCpp(data.m_optionalBatchId,       result.m_optionalBatchId);
         CToCpp(data.m_pOptionalRoute,        result.m_optionalRoute);
         CToCpp(data.m_pOptionalAction,       result.m_optionalAction);
-        CToCpp(data.m_optionalSubBoards,     result.m_subBoards);
+        CToCpp(data.m_optionalSubBoards,     result.m_optionalSubBoards);
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // RevokeBoardAvailableData
+    // -------------------------------------------------------------------------
     template<> struct Converter2C<RevokeBoardAvailableData> : ConverterBase<HermesRevokeBoardAvailableData>
     { explicit Converter2C(const RevokeBoardAvailableData&) {} };
     inline RevokeBoardAvailableData ToCpp(const HermesRevokeBoardAvailableData&) { return {}; }
 
+    // -------------------------------------------------------------------------
     // MachineReadyData
+    // FIX: field names corrected (m_length -> m_optionalLengthInMM, etc.)
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<MachineReadyData> : ConverterBase<HermesMachineReadyData>
     {
         explicit Converter2C(const MachineReadyData& data)
         {
-            CppToC(data.m_failedBoard,            m_data.m_failedBoard);
-            CppToC(data.m_optionalForecastId,     m_data.m_optionalForecastId);
-            CppToC(data.m_optionalBoardId,        m_data.m_optionalBoardId);
-            CppToC(data.m_optionalProductTypeId,  m_data.m_optionalProductTypeId);
-            CppToC(data.m_optionalFlippedBoard,   m_optFlipped, m_data.m_pOptionalFlippedBoard);
-            CppToC(data.m_optionalTopBarcode,     m_data.m_optionalTopBarcode);
-            CppToC(data.m_optionalBottomBarcode,  m_data.m_optionalBottomBarcode);
-            CppToC(data.m_length,        m_optLength, m_data.m_pOptionalLengthInMM);
-            CppToC(data.m_width,         m_optWidth,  m_data.m_pOptionalWidthInMM);
-            CppToC(data.m_thickness,     m_optThick,  m_data.m_pOptionalThicknessInMM);
-            CppToC(data.m_conveyorSpeed, m_optSpeed,  m_data.m_pOptionalConveyorSpeedInMMPerSecs);
-            CppToC(data.m_topClearanceHeight,    m_optTopClear, m_data.m_pOptionalTopClearanceHeightInMM);
-            CppToC(data.m_bottomClearanceHeight, m_optBotClear, m_data.m_pOptionalBottomClearanceHeightInMM);
-            CppToC(data.m_weight,        m_optWeight, m_data.m_pOptionalWeightInGrams);
-            CppToC(data.m_optionalWorkOrderId, m_data.m_optionalWorkOrderId);
-            CppToC(data.m_optionalBatchId,     m_data.m_optionalBatchId);
+            CppToC(data.m_failedBoard,                    m_data.m_failedBoard);
+            CppToC(data.m_optionalForecastId,             m_data.m_optionalForecastId);
+            CppToC(data.m_optionalBoardId,                m_data.m_optionalBoardId);
+            CppToC(data.m_optionalProductTypeId,          m_data.m_optionalProductTypeId);
+            CppToC(data.m_optionalFlippedBoard,           m_optFlipped, m_data.m_pOptionalFlippedBoard);
+            CppToC(data.m_optionalTopBarcode,             m_data.m_optionalTopBarcode);
+            CppToC(data.m_optionalBottomBarcode,          m_data.m_optionalBottomBarcode);
+            CppToC(data.m_optionalLengthInMM,             m_optLength, m_data.m_pOptionalLengthInMM);
+            CppToC(data.m_optionalWidthInMM,              m_optWidth,  m_data.m_pOptionalWidthInMM);
+            CppToC(data.m_optionalThicknessInMM,          m_optThick,  m_data.m_pOptionalThicknessInMM);
+            CppToC(data.m_optionalConveyorSpeedInMMPerSecs, m_optSpeed, m_data.m_pOptionalConveyorSpeedInMMPerSecs);
+            CppToC(data.m_optionalTopClearanceHeightInMM,   m_optTopCl, m_data.m_pOptionalTopClearanceHeightInMM);
+            CppToC(data.m_optionalBottomClearanceHeightInMM,m_optBotCl, m_data.m_pOptionalBottomClearanceHeightInMM);
+            CppToC(data.m_optionalWeightInGrams,          m_optWeight, m_data.m_pOptionalWeightInGrams);
+            CppToC(data.m_optionalWorkOrderId,            m_data.m_optionalWorkOrderId);
+            CppToC(data.m_optionalBatchId,                m_data.m_optionalBatchId);
         }
     private:
         EHermesFlippedBoard m_optFlipped{};
         double m_optLength{}, m_optWidth{}, m_optThick{}, m_optSpeed{};
-        double m_optTopClear{}, m_optBotClear{}, m_optWeight{};
+        double m_optTopCl{}, m_optBotCl{}, m_optWeight{};
     };
     inline MachineReadyData ToCpp(const HermesMachineReadyData& data)
     {
         MachineReadyData result;
-        CToCpp(data.m_failedBoard,           result.m_failedBoard);
-        CToCpp(data.m_optionalForecastId,    result.m_optionalForecastId);
-        CToCpp(data.m_optionalBoardId,       result.m_optionalBoardId);
-        CToCpp(data.m_optionalProductTypeId, result.m_optionalProductTypeId);
-        CToCpp(data.m_pOptionalFlippedBoard, result.m_optionalFlippedBoard);
-        CToCpp(data.m_optionalTopBarcode,    result.m_optionalTopBarcode);
-        CToCpp(data.m_optionalBottomBarcode, result.m_optionalBottomBarcode);
-        CToCpp(data.m_pOptionalLengthInMM,               result.m_length);
-        CToCpp(data.m_pOptionalWidthInMM,                result.m_width);
-        CToCpp(data.m_pOptionalThicknessInMM,            result.m_thickness);
-        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs, result.m_conveyorSpeed);
-        CToCpp(data.m_pOptionalTopClearanceHeightInMM,   result.m_topClearanceHeight);
-        CToCpp(data.m_pOptionalBottomClearanceHeightInMM,result.m_bottomClearanceHeight);
-        CToCpp(data.m_pOptionalWeightInGrams,            result.m_weight);
-        CToCpp(data.m_optionalWorkOrderId,  result.m_optionalWorkOrderId);
-        CToCpp(data.m_optionalBatchId,      result.m_optionalBatchId);
+        CToCpp(data.m_failedBoard,            result.m_failedBoard);
+        CToCpp(data.m_optionalForecastId,     result.m_optionalForecastId);
+        CToCpp(data.m_optionalBoardId,        result.m_optionalBoardId);
+        CToCpp(data.m_optionalProductTypeId,  result.m_optionalProductTypeId);
+        CToCpp(data.m_pOptionalFlippedBoard,  result.m_optionalFlippedBoard);
+        CToCpp(data.m_optionalTopBarcode,     result.m_optionalTopBarcode);
+        CToCpp(data.m_optionalBottomBarcode,  result.m_optionalBottomBarcode);
+        CToCpp(data.m_pOptionalLengthInMM,               result.m_optionalLengthInMM);
+        CToCpp(data.m_pOptionalWidthInMM,                result.m_optionalWidthInMM);
+        CToCpp(data.m_pOptionalThicknessInMM,            result.m_optionalThicknessInMM);
+        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs, result.m_optionalConveyorSpeedInMMPerSecs);
+        CToCpp(data.m_pOptionalTopClearanceHeightInMM,   result.m_optionalTopClearanceHeightInMM);
+        CToCpp(data.m_pOptionalBottomClearanceHeightInMM,result.m_optionalBottomClearanceHeightInMM);
+        CToCpp(data.m_pOptionalWeightInGrams,            result.m_optionalWeightInGrams);
+        CToCpp(data.m_optionalWorkOrderId,    result.m_optionalWorkOrderId);
+        CToCpp(data.m_optionalBatchId,        result.m_optionalBatchId);
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // RevokeMachineReadyData
+    // -------------------------------------------------------------------------
     template<> struct Converter2C<RevokeMachineReadyData> : ConverterBase<HermesRevokeMachineReadyData>
     { explicit Converter2C(const RevokeMachineReadyData&) {} };
     inline RevokeMachineReadyData ToCpp(const HermesRevokeMachineReadyData&) { return {}; }
 
+    // -------------------------------------------------------------------------
     // StartTransportData
+    // FIX: field name corrected: m_conveyorSpeed -> m_optionalConveyorSpeedInMMPerSecs
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<StartTransportData> : ConverterBase<HermesStartTransportData>
     {
         explicit Converter2C(const StartTransportData& data)
         {
-            CppToC(data.m_boardId,       m_data.m_boardId);
-            CppToC(data.m_conveyorSpeed, m_optSpeed, m_data.m_pOptionalConveyorSpeedInMMPerSecs);
+            CppToC(data.m_boardId,                       m_data.m_boardId);
+            CppToC(data.m_optionalConveyorSpeedInMMPerSecs, m_optSpeed, m_data.m_pOptionalConveyorSpeedInMMPerSecs);
         }
     private:
         double m_optSpeed{};
@@ -605,11 +606,13 @@ namespace Hermes
     {
         StartTransportData result;
         CToCpp(data.m_boardId,                           result.m_boardId);
-        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs, result.m_conveyorSpeed);
+        CToCpp(data.m_pOptionalConveyorSpeedInMMPerSecs, result.m_optionalConveyorSpeedInMMPerSecs);
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // StopTransportData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<StopTransportData> : ConverterBase<HermesStopTransportData>
     {
@@ -627,7 +630,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // TransportFinishedData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<TransportFinishedData> : ConverterBase<HermesTransportFinishedData>
     {
@@ -645,7 +650,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // QueryBoardInfoData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<QueryBoardInfoData> : ConverterBase<HermesQueryBoardInfoData>
     {
@@ -663,14 +670,13 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // CommandData
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<CommandData> : ConverterBase<HermesCommandData>
     {
-        explicit Converter2C(const CommandData& data)
-        {
-            CppToC(data.m_command, m_data.m_command);
-        }
+        explicit Converter2C(const CommandData& data) { CppToC(data.m_command, m_data.m_command); }
     };
     inline CommandData ToCpp(const HermesCommandData& data)
     {
@@ -679,7 +685,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // UpstreamSettings
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<UpstreamSettings> : ConverterBase<HermesUpstreamSettings>
     {
@@ -707,7 +715,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // DownstreamSettings
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<DownstreamSettings> : ConverterBase<HermesDownstreamSettings>
     {
@@ -735,7 +745,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // ConfigurationServiceSettings
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<ConfigurationServiceSettings> : ConverterBase<HermesConfigurationServiceSettings>
     {
@@ -753,7 +765,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // VerticalServiceSettings
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<VerticalServiceSettings> : ConverterBase<HermesVerticalServiceSettings>
     {
@@ -777,7 +791,9 @@ namespace Hermes
         return result;
     }
 
+    // -------------------------------------------------------------------------
     // VerticalClientSettings
+    // -------------------------------------------------------------------------
     template<>
     struct Converter2C<VerticalClientSettings> : ConverterBase<HermesVerticalClientSettings>
     {
