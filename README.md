@@ -84,46 +84,122 @@ Downstream machine                    Upstream machine
 | `Modern::Upstream`   | `ServiceDescription`, `BoardAvailable`, `RevokeBoardAvailable`, `TransportFinished`, `BoardForecast`, `SendBoardInfo` | `ServiceDescription`, `MachineReady`, `RevokeMachineReady`, `StartTransport`, `StopTransport`, `QueryBoardInfo` |
 
 ---
+# Building the Hermes C++ Library
 
-## 3. Building the library
+The Hermes library uses **CMake** as its universal build system. The library has been modernized to use **Header-Only Boost** for its core networking, making it incredibly lightweight and easy to compile natively on Windows, Linux, and macOS without complex binary linking.
 
-### Prerequisites
+---
+
+## 1. Prerequisites
+
+Before building, ensure your environment has the following:
+
+* **C++17 Compiler**: GCC 7+ / Clang 5+ (Linux) or MSVC 2017+ / MinGW-w64 (Windows).
+* **CMake**: Version 3.15 or higher.
+* **Boost Libraries**: Version 1.66 to 1.78.
+* **pugixml**: XML parsing library.
+
+---
+
+### 2. Environment Setup
+
+### Linux (Ubuntu / Debian)
+On Linux, dependencies are easily managed via the system package manager. Install the standard build essentials, Boost, and pugixml directly:
 
 ```bash
-# Debian / Ubuntu / Raspberry Pi OS
-sudo apt install -y g++ cmake libboost-all-dev
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y g++ cmake libboost-all-dev libpugixml-dev git
+```
+### Windows
+On Windows, dependencies are managed manually.
 
-# macOS
-brew install cmake boost
+- Boost (1.66 - 1.78): Download the Boost source or precompiled headers. Extract the contents into a local References/ directory within your project root (e.g., References/boost).
 
-# Windows
-# Install Boost via vcpkg: vcpkg install boost
+- pugixml: Download the pugixml source and place it in the References/pugixml/ directory.
+
+(CMake will be configured to point to these local reference folders in the next steps).
+
+### 3. Standard Build Process
+The CMake workflow is generally identical regardless of your operating system. Open a terminal in the root of the cloned repository.
+
+#### Step 1: Create a Build Directory
+Always perform an "out-of-source" build to keep your source tree clean.
+
+```Bash
+mkdir build
+cd build
 ```
 
-### Build
+#### Step 2: Configure the Project
 
-```bash
-git clone https://github.com/hermes-org/lib_cpp.git
-cd lib_cpp
-mkdir build && cd build
+For windows run this command to set MSYS2 binaries into the path for this session
+```Bash
+set PATH=C:\msys64\ucrt64\bin;%PATH%
+```
+
+Now, Run CMake to generate the build files.
+
+```Bash
 cmake ..
-make -j4
+cmake --build . --config Release --parallel 4
 ```
+(You can remove parallel flag or adjust the number based on your number of cores. I was working on RPi so i used all 4 cores)
 
-This produces `build/src/Hermes/libhermes.so` (Linux/macOS) or `hermes.dll` (Windows).
+#### Build Outputs
+Once the build completes successfully, the compiled binaries will be located in the build/src/Hermes/ directory:
 
-### Compile your application
+- Linux: libhermes.so
 
+- Windows: hermes.dll / hermes.lib
+
+- macOS: libhermes.dylib
+
+### Step 3: Building and Running the Tests
+The repository includes a test suite (BoostTestHermes) to verify protocol compliance.
+
+Note: While the core library is header-only, building the tests requires the compiled boost_unit_test_framework binary.
+
+To run the tests from inside your build directory:
+
+```Bash
+ctest --output-on-failure -C Release
+```
+Alternatively, you can run the executable directly:
+
+Windows: `.\test\BoostTestHermes\Release\BoostTestHermes.exe`
+
+Linux: `./test/BoostTestHermes/BoostTestHermes`
+
+## Step 4: Compiling Your Application
+
+To compile a standalone C++ application that links against the Hermes library, you must point your compiler to the Hermes include directory and the folder containing your newly built binaries. 
+
+Replace `<path-to-hermes>` with the actual path to your cloned repository.
+
+**For Linux:**
 ```bash
-g++ -std=c++17 -o myapp myapp.cpp \
-    -I./src/include \
-    -L./build/src/Hermes -lhermes \
+g++ -std=c++17 -o my_app my_app.cpp \
+    -I/<path-to-hermes>/src/include \
+    -L/<path-to-hermes>/build/src/Hermes -lhermes \
     -lboost_system -lpthread
-#change the commands according to your OS
-
-# Run (Linux — tell the linker where to find the .so)
-LD_LIBRARY_PATH=./build/src/Hermes ./myapp
 ```
+**For Windows:**
+```bash
+g++ -std=c++17 -o my_app.exe my_app.cpp ^
+    -IC:\<path-to-hermes>\src\include ^
+    -LC:\<path-to-hermes>\build\src\Hermes -lhermes ^
+    -lws2_32 -lmswsock -liphlpapi
+```
+
+#### Running the compiled application:
+
+- Linux: If you receive a "shared object file not found" error, ensure the linker knows where libhermes.so is located:
+
+```Bash
+LD_LIBRARY_PATH=/<path-to-hermes>/build/src/Hermes ./my_app 
+```
+
+- Windows: Ensure that hermes.dll is either in the same directory as my_app.exe, or that its folder is added to your system's PATH.
 
 ---
 
